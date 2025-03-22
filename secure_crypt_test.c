@@ -1,12 +1,15 @@
 #include <windows.h>
 #include <iostream>
 #include <string>
+#include <iomanip>
 
 // Global hook handle
 HHOOK keyboardHook;
 std::string inputBuffer;
+std::string secretKey;
 bool running = true;
 HANDLE hConsole;
+bool keyCaptured = false;
 
 // Keyboard hook procedure
 LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
@@ -15,7 +18,7 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 void SetupConsole();
 void ProcessKeyboard();
 void CleanupResources();
-char XOREncryptDecrypt(char input, char key);
+std::string XOREncryptDecrypt(char input, std::string key, size_t pos);
 
 int main() {
     SetupConsole();
@@ -37,9 +40,8 @@ void SetupConsole() {
     hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
     std::cout << "=================================================" << std::endl;
-    std::cout << "      USB KEYBOARD CONSOLE BRIDGE ACTIVATED      " << std::endl;
+    std::cout << "  USB KEYBOARD SECURE MESSAGE CONSOLE ACTIVATED  " << std::endl;
     std::cout << "=================================================" << std::endl;
-    std::cout << "Press ESC key to exit the application\n" << std::endl;
     SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 }
 
@@ -71,8 +73,8 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 std::string spaces(csbi.dwSize.X, ' ');
                 std::cout << spaces;
                 SetConsoleCursorPosition(hConsole, cursorPos);
-                for (char c : inputBuffer) {
-                    std::cout << XOREncryptDecrypt(c, 0xAA);
+                for (size_t i = 0; i < inputBuffer.size(); ++i) {
+                    std::cout << XOREncryptDecrypt(inputBuffer[i], secretKey, i);
                 }
             }
         }
@@ -90,8 +92,17 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             int result = ToAscii(key, MapVirtualKey(key, MAPVK_VK_TO_VSC), keyboardState, &character, 0);
             if (result == 1) {
                 buffer[0] = (char)character;
-                std::cout << XOREncryptDecrypt(buffer[0], 0xAA);
-                inputBuffer += buffer[0];
+                if (!keyCaptured) {
+                    secretKey += buffer[0];
+                    std::cout << '*'; // Display '*' instead of the actual character
+                    if (secretKey.size() == 8) {
+                        keyCaptured = true;
+                        std::cout << "\nSecret key captured. You can now type your message.\n";
+                    }
+                } else {
+                    std::cout << XOREncryptDecrypt(buffer[0], secretKey, inputBuffer.size());
+                    inputBuffer += buffer[0];
+                }
             }
         }
 
@@ -113,6 +124,7 @@ void ProcessKeyboard() {
     }
 
     std::cout << "Keyboard hook installed. All keystrokes are now redirected." << std::endl;
+    std::cout << "Please type the 8-character secret key:\n";
 
     // Message loop to keep the program running and process Windows messages
     MSG msg;
@@ -134,6 +146,9 @@ void CleanupResources() {
     }
 }
 
-char XOREncryptDecrypt(char input, char key) {
-    return input ^ key;
+std::string XOREncryptDecrypt(char input, std::string key, size_t pos) {
+    char encryptedChar = input ^ key[pos % key.length()];
+    std::ostringstream oss;
+    oss << std::hex << std::setw(2) << std::setfill('0') << (int)(unsigned char)encryptedChar;
+    return oss.str();
 }
