@@ -134,7 +134,7 @@ void ProcessKeyboard() {
     }
 
     // Exit message
-    std::cout << "\n\nExiting USB Keyboard Console Bridge..." << std::endl;
+    std::cout << "\n\nExiting..." << std::endl;
     Sleep(1000);
 }
 
