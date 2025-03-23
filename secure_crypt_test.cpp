@@ -18,9 +18,10 @@ bool running = true;
 HANDLE hConsole;
 bool keyCaptured = false;
 bool paddingAdded = false;
+bool decryptMode = false;       // New flag for decrypt mode
 
 // Output file
-std::ofstream outputFile("output.txt", std::ios::app);
+std::ofstream outputFile("output.txt");
 
 // Keyboard hook procedure
 LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
@@ -29,10 +30,12 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 void SetupConsole();
 void ProcessKeyboard();
 void CleanupResources();
-std::string XOREncryptDecrypt(char input, std::string key, size_t pos);
+char XOREncryptDecryptChar(char input, const std::string& key, size_t pos);
 std::string GeneratePassword(int length, const std::string& seed);
 std::string GeneratePadding(int length);
 void DumpToFile(const std::string& text);
+void EnterDecryptMode();
+std::string XOREncryptDecrypt(const std::string& input, const std::string& key);
 
 int main() {
     SetupConsole();
@@ -58,7 +61,10 @@ std::string GeneratePassword(int length, const std::string& seed) {
     std::mt19937 rng(numericSeed);
     std::uniform_int_distribution<int> dist(0, characters.size() - 1);
 
-    for (int i = 0; i < length; ++i) {
+    // Use a more reasonable length to avoid memory issues
+    int actualLength = std::min(length, 1000); // Limit to 1000 characters
+
+    for (int i = 0; i < actualLength; ++i) {
         password += characters[dist(rng)];
     }
     return password;
@@ -68,12 +74,15 @@ std::string GeneratePadding(int length) {
     const std::string characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     std::string padding;
 
+    // Use a reasonable padding size to avoid memory issues (100 chars is enough for demonstration)
+    int paddingSize = 100;
+
     // Seed the random number generator with a random device
     std::random_device rd;
     std::mt19937 rng(rd());
     std::uniform_int_distribution<int> dist(0, characters.size() - 1);
 
-    for (int i = 0; i < length; ++i) {
+    for (int i = 0; i < paddingSize; ++i) {
         padding += characters[dist(rng)];
     }
     return padding;
@@ -111,7 +120,7 @@ void SetupConsole() {
     std::cout << "=================================================" << std::endl;
     std::cout << "  USB KEYBOARD SECURE MESSAGE CONSOLE ACTIVATED  " << std::endl;
     std::cout << "=================================================" << std::endl;
-    std::cout << "Press ESC to save to file..." << std::endl;
+    std::cout << "Press ESC to toggle decrypt mode..." << std::endl;
     SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 }
 
@@ -126,13 +135,31 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         KBDLLHOOKSTRUCT* kbdStruct = (KBDLLHOOKSTRUCT*)lParam;
         int key = kbdStruct->vkCode;
 
-        // Check for ESC key to exit
+        // Check for ESC key to toggle decrypt mode
         if (key == VK_ESCAPE) {
-            running = false;
-            DumpToFile(encryptedBuffer.substr(fud)); // Dump remaining buffer to file before exiting
-
+            if (!decryptMode) {
+                // Save current buffer and enter decrypt mode - only if we have something to save
+                if (paddingAdded && encryptedBuffer.length() > 0) {
+                    DumpToFile(encryptedBuffer); // Dump buffer to file
+                }
+                EnterDecryptMode();
+            } else {
+                // Exit decrypt mode and return to encrypt mode
+                decryptMode = false;
+                system("cls");
+                SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+                std::cout << "Returning to encrypt mode..." << std::endl;
+                std::cout << "Press ESC to toggle decrypt mode..." << std::endl;
+                SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+                keyCaptured = false;
+                secretKey = "";
+                paddingAdded = false;
+                encryptedBuffer = "";
+                std::cout << "Please type the 8-character secret key:\n";
+            }
         }
-        else {
+        else if (!decryptMode) {
+            // Normal encrypt mode operation
             // Convert virtual key to character
             BYTE keyboardState[256] = {0};
             GetKeyboardState(keyboardState);
@@ -148,16 +175,18 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     if (secretKey.size() == 8) {
                         keyCaptured = true;
                         std::cout << "\nSecret key captured. You can now type your message.\n";
-                        secretKey = GeneratePassword(fud, secretKey);
+                        // Use a reasonable key length to avoid memory issues
+                        secretKey = GeneratePassword(100, secretKey);
                     }
                 } else {
                     if (!paddingAdded) {
-                        std::string padding = GeneratePadding(fud); // Generate padding
+                        std::string padding = GeneratePadding(100); // Generate reasonable padding
                         encryptedBuffer += padding; // Add padding to encrypted buffer
                         paddingAdded = true;
                     }
-                    std::string encryptedChar = XOREncryptDecrypt(buffer[0], secretKey, encryptedBuffer.size());
-                    std::cout << encryptedChar;
+                    // Updated: direct character encryption without hex conversion
+                    char encryptedChar = XOREncryptDecryptChar(buffer[0], secretKey, encryptedBuffer.size());
+                    std::cout << encryptedChar; // Show encrypted character (might show non-printable chars)
                     encryptedBuffer += encryptedChar; // Add encrypted character to encrypted buffer
                 }
             }
@@ -215,9 +244,68 @@ void DumpToFile(const std::string& text) {
     }
 }
 
-std::string XOREncryptDecrypt(char input, std::string key, size_t pos) {
-    char encryptedChar = input ^ key[pos % key.length()];
-    std::ostringstream oss;
-    oss << std::hex << std::setw(2) << std::setfill('0') << (int)(unsigned char)encryptedChar;
-    return oss.str();
+void EnterDecryptMode() {
+    decryptMode = true;
+    system("cls");
+    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+    std::cout << "=================================================" << std::endl;
+    std::cout << "                DECRYPT MODE ACTIVE               " << std::endl;
+    std::cout << "=================================================" << std::endl;
+
+    // If we don't have a key yet, ask for one first
+    if (secretKey.empty()) {
+        std::cout << "Enter the 8-character secret key used for encryption: ";
+        std::string rawKey;
+        std::cin >> rawKey;
+        // Use a reasonable key length to avoid memory issues
+        secretKey = GeneratePassword(100, rawKey);
+    }
+
+    // Open and read the encrypted file
+    std::ifstream inputFile("output.txt");
+    if (!inputFile.is_open()) {
+        std::cerr << "Failed to open output.txt for decryption!" << std::endl;
+        return;
+    }
+
+    std::string encryptedContent;
+    std::string line;
+    while (std::getline(inputFile, line)) {
+        encryptedContent += line;
+    }
+    inputFile.close();
+
+    if (encryptedContent.empty()) {
+        std::cout << "No encrypted content found in output.txt" << std::endl;
+        return;
+    }
+
+    // Skip the padding at the beginning - only if content is long enough
+    int paddingSize = 100; // We're using a fixed padding size of 100 now
+    if (encryptedContent.length() > paddingSize) {
+        encryptedContent = encryptedContent.substr(paddingSize);
+    }
+
+    // Decrypt the content - now working directly with characters instead of hex
+    std::string decryptedText;
+    for (size_t i = 0; i < encryptedContent.length(); i++) {
+        // XOR with key at position
+        char decryptedChar = XOREncryptDecryptChar(encryptedContent[i], secretKey, i);
+        decryptedText += decryptedChar;
+    }
+
+    // Display decrypted content
+    SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+    std::cout << "\nDecrypted content:\n" << std::endl;
+    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+    std::cout << decryptedText << std::endl << std::endl;
+
+    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+    std::cout << "Press ESC to return to encrypt mode..." << std::endl;
+    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+}
+
+// New function that directly encrypts/decrypts a character without hex conversion
+char XOREncryptDecryptChar(char input, const std::string& key, size_t pos) {
+    return input ^ key[pos % key.length()];
 }
