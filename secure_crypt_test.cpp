@@ -4,18 +4,23 @@
 #include <iomanip>
 #include <random>
 #include <sstream>
+#include <fstream>
 #include <functional>
 
-int fud = 99999;
+int fud = 9999999;
 
 // Global hook handle
 HHOOK keyboardHook;
-std::string inputBuffer;
+std::string inputBuffer;        // Actual user input buffer
+std::string encryptedBuffer;    // Encrypted content buffer
 std::string secretKey;
 bool running = true;
 HANDLE hConsole;
 bool keyCaptured = false;
 bool paddingAdded = false;
+
+// Output file
+std::ofstream outputFile("output.txt", std::ios::app);
 
 // Keyboard hook procedure
 LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
@@ -27,6 +32,7 @@ void CleanupResources();
 std::string XOREncryptDecrypt(char input, std::string key, size_t pos);
 std::string GeneratePassword(int length, const std::string& seed);
 std::string GeneratePadding(int length);
+void DumpToFile(const std::string& text);
 
 int main() {
     SetupConsole();
@@ -105,6 +111,7 @@ void SetupConsole() {
     std::cout << "=================================================" << std::endl;
     std::cout << "  USB KEYBOARD SECURE MESSAGE CONSOLE ACTIVATED  " << std::endl;
     std::cout << "=================================================" << std::endl;
+    std::cout << "Press ESC to save to file..." << std::endl;
     SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 }
 
@@ -119,10 +126,11 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         KBDLLHOOKSTRUCT* kbdStruct = (KBDLLHOOKSTRUCT*)lParam;
         int key = kbdStruct->vkCode;
 
+        // Check for ESC key to exit
+        if (key == VK_ESCAPE) {
+            running = false;
+            DumpToFile(encryptedBuffer.substr(fud)); // Dump remaining buffer to file before exiting
 
-        if (key == VK_RETURN) { // Enter
-            std::cout << std::endl;
-            inputBuffer.clear();
         }
         else {
             // Convert virtual key to character
@@ -145,11 +153,13 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 } else {
                     if (!paddingAdded) {
                         std::string padding = GeneratePadding(fud); // Generate padding
-                        inputBuffer += padding;
+                        encryptedBuffer += padding; // Add padding to encrypted buffer
                         paddingAdded = true;
                     }
-                    std::cout << XOREncryptDecrypt(buffer[0], secretKey, inputBuffer.size());
-                    inputBuffer += buffer[0];
+                    std::string encryptedChar = XOREncryptDecrypt(buffer[0], secretKey, encryptedBuffer.size());
+                    std::cout << encryptedChar;
+                    inputBuffer += buffer[0]; // Add the actual character to user input buffer
+                    encryptedBuffer += encryptedChar; // Add encrypted character to encrypted buffer
                 }
             }
         }
@@ -191,6 +201,18 @@ void CleanupResources() {
     if (keyboardHook) {
         UnhookWindowsHookEx(keyboardHook);
         keyboardHook = NULL;
+    }
+    // Close the output file
+    if (outputFile.is_open()) {
+        outputFile.close();
+    }
+}
+
+void DumpToFile(const std::string& text) {
+    if (outputFile.is_open()) {
+        outputFile << text << std::endl;
+    } else {
+        std::cerr << "Failed to write to file. Output file is not open." << std::endl;
     }
 }
 
