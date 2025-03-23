@@ -158,7 +158,6 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     }
                     std::string encryptedChar = XOREncryptDecrypt(buffer[0], secretKey, encryptedBuffer.size());
                     std::cout << encryptedChar;
-                    inputBuffer += buffer[0]; // Add the actual character to user input buffer
                     encryptedBuffer += encryptedChar; // Add encrypted character to encrypted buffer
                 }
             }
