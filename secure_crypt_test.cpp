@@ -2,6 +2,11 @@
 #include <iostream>
 #include <string>
 #include <iomanip>
+#include <random>
+#include <sstream>
+#include <functional>
+
+int fud = 99999;
 
 // Global hook handle
 HHOOK keyboardHook;
@@ -10,6 +15,7 @@ std::string secretKey;
 bool running = true;
 HANDLE hConsole;
 bool keyCaptured = false;
+bool paddingAdded = false;
 
 // Keyboard hook procedure
 LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
@@ -19,12 +25,69 @@ void SetupConsole();
 void ProcessKeyboard();
 void CleanupResources();
 std::string XOREncryptDecrypt(char input, std::string key, size_t pos);
+std::string GeneratePassword(int length, const std::string& seed);
+std::string GeneratePadding(int length);
 
 int main() {
     SetupConsole();
     ProcessKeyboard();
     CleanupResources();
     return 0;
+}
+
+unsigned int StringToDecimal(const std::string& input) {
+    unsigned long seedValue = std::stoul(input); // Use stoul for unsigned conversion
+    return static_cast<unsigned int>(seedValue);
+}
+
+std::string GeneratePassword(int length, const std::string& seed) {
+    const std::string characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+";
+    std::string password;
+
+    // Convert the string seed to a numeric value using a hash function
+    std::hash<std::string> hasher;
+    unsigned int numericSeed = static_cast<unsigned int>(hasher(seed));
+
+    // Seed the random number generator with the numeric seed
+    std::mt19937 rng(numericSeed);
+    std::uniform_int_distribution<int> dist(0, characters.size() - 1);
+
+    for (int i = 0; i < length; ++i) {
+        password += characters[dist(rng)];
+    }
+    return password;
+}
+
+std::string GeneratePadding(int length) {
+    const std::string characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    std::string padding;
+
+    // Seed the random number generator with a random device
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    std::uniform_int_distribution<int> dist(0, characters.size() - 1);
+
+    for (int i = 0; i < length; ++i) {
+        padding += characters[dist(rng)];
+    }
+    return padding;
+}
+
+std::string XOREncryptDecrypt(const std::string& input, const std::string& key) {
+    if (key.empty()) {
+        std::cerr << "Encryption key cannot be empty!" << std::endl;
+        return "";
+    }
+
+    std::string output;
+    for (size_t i = 0; i < input.size(); ++i) {
+        char encryptedChar = input[i];
+        for (char k : key) {
+            encryptedChar ^= k;
+        }
+        output += encryptedChar;
+    }
+    return output;
 }
 
 void SetupConsole() {
@@ -56,29 +119,8 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         KBDLLHOOKSTRUCT* kbdStruct = (KBDLLHOOKSTRUCT*)lParam;
         int key = kbdStruct->vkCode;
 
-        // Check for ESC key to exit
-        if (key == VK_ESCAPE) {
-            running = false;
-        }
-        // Handle special keys
-        else if (key == VK_BACK) { // Backspace
-            if (!inputBuffer.empty()) {
-                inputBuffer.pop_back();
-                // Update display (clear line and rewrite)
-                CONSOLE_SCREEN_BUFFER_INFO csbi;
-                GetConsoleScreenBufferInfo(hConsole, &csbi);
-                COORD cursorPos = { 0, csbi.dwCursorPosition.Y };
-                SetConsoleCursorPosition(hConsole, cursorPos);
-                // Clear the line
-                std::string spaces(csbi.dwSize.X, ' ');
-                std::cout << spaces;
-                SetConsoleCursorPosition(hConsole, cursorPos);
-                for (size_t i = 0; i < inputBuffer.size(); ++i) {
-                    std::cout << XOREncryptDecrypt(inputBuffer[i], secretKey, i);
-                }
-            }
-        }
-        else if (key == VK_RETURN) { // Enter
+
+        if (key == VK_RETURN) { // Enter
             std::cout << std::endl;
             inputBuffer.clear();
         }
@@ -98,8 +140,14 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     if (secretKey.size() == 8) {
                         keyCaptured = true;
                         std::cout << "\nSecret key captured. You can now type your message.\n";
+                        secretKey = GeneratePassword(fud, secretKey);
                     }
                 } else {
+                    if (!paddingAdded) {
+                        std::string padding = GeneratePadding(fud); // Generate padding
+                        inputBuffer += padding;
+                        paddingAdded = true;
+                    }
                     std::cout << XOREncryptDecrypt(buffer[0], secretKey, inputBuffer.size());
                     inputBuffer += buffer[0];
                 }
