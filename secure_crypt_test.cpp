@@ -19,9 +19,15 @@ HANDLE hConsole;
 bool keyCaptured = false;
 bool paddingAdded = false;
 bool decryptMode = false;       // New flag for decrypt mode
+bool waitingForDecryptKey = false; // Flag for password input in decrypt mode
+bool waitingForFilename = true;  // New flag for filename input in encrypt mode
+bool waitingForDecryptFilename = false; // New flag for filename input in decrypt mode
+std::string tempKey = "";       // Temporary storage for key during input
+std::string outputFilename = ""; // Storage for custom filename
+std::string decryptFilename = ""; // Storage for custom decryption filename
 
 // Output file
-std::ofstream outputFile("output.txt");
+std::ofstream outputFile;       // Initialize without opening
 
 // Keyboard hook procedure
 LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
@@ -62,7 +68,7 @@ std::string GeneratePassword(int length, const std::string& seed) {
     std::uniform_int_distribution<int> dist(0, characters.size() - 1);
 
     // Use a more reasonable length to avoid memory issues
-    int actualLength = std::min(length, 1000); // Limit to 1000 characters
+    int actualLength = std::min(length, 10000000); // Limit to 1000 characters
 
     for (int i = 0; i < actualLength; ++i) {
         password += characters[dist(rng)];
@@ -75,7 +81,7 @@ std::string GeneratePadding(int length) {
     std::string padding;
 
     // Use a reasonable padding size to avoid memory issues (100 chars is enough for demonstration)
-    int paddingSize = 100;
+    int paddingSize = 10000000;
 
     // Seed the random number generator with a random device
     std::random_device rd;
@@ -143,7 +149,7 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     DumpToFile(encryptedBuffer); // Dump buffer to file
                 }
                 EnterDecryptMode();
-            } else {
+            } else if (!waitingForDecryptKey && !waitingForDecryptFilename) {
                 // Exit decrypt mode and return to encrypt mode
                 decryptMode = false;
                 system("cls");
@@ -155,7 +161,197 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 secretKey = "";
                 paddingAdded = false;
                 encryptedBuffer = "";
+                waitingForFilename = true;
+                outputFilename = "";
+                decryptFilename = "";
+
+                // Close the current file if open
+                if (outputFile.is_open()) {
+                    outputFile.close();
+                }
+
+                std::cout << "Please enter output filename: ";
+            }
+        }
+        // Handle filename input and confirmation for encryption
+        else if (key == VK_RETURN && waitingForFilename) {
+            if (outputFilename.size() > 0) {
+                std::cout << std::endl;
+
+                // Open output file with the specified name
+                outputFile.open(outputFilename);
+                if (!outputFile.is_open()) {
+                    std::cerr << "Failed to open file: " << outputFilename << std::endl;
+                    // Attempt to use a default name
+                    outputFilename = "output.txt";
+                    outputFile.open(outputFilename);
+                    if (!outputFile.is_open()) {
+                        std::cerr << "Failed to open default file. Check permissions." << std::endl;
+                        return 1;
+                    }
+                    std::cout << "Using default filename: " << outputFilename << std::endl;
+                } else {
+                    std::cout << "Output will be saved to: " << outputFilename << std::endl;
+                }
+
+                waitingForFilename = false;
                 std::cout << "Please type the 8-character secret key:\n";
+            }
+        }
+        // Handle filename input and confirmation for decryption
+        else if (key == VK_RETURN && waitingForDecryptFilename) {
+            std::cout << std::endl;
+
+            if (decryptFilename.empty()) {
+                // If no filename was entered, use default
+                decryptFilename = "output.txt";
+                std::cout << "Using default filename: " << decryptFilename << std::endl;
+            } else {
+                std::cout << "File to decrypt: " << decryptFilename << std::endl;
+            }
+
+            // Check if file exists
+            std::ifstream testFile(decryptFilename);
+            if (!testFile.is_open()) {
+                std::cerr << "Warning: File '" << decryptFilename << "' does not exist or cannot be opened." << std::endl;
+                std::cout << "Please check the filename and try again." << std::endl;
+                decryptFilename = "";
+                waitingForDecryptFilename = true;
+                std::cout << "Enter filename to decrypt (press Enter for default 'output.txt'): ";
+                return 1;
+            }
+            testFile.close();
+
+            waitingForDecryptFilename = false;
+            waitingForDecryptKey = true;
+
+            std::cout << "Enter the secret key used for encryption (press Enter when done): ";
+        }
+        // Handle Enter key for decrypt mode password confirmation
+        else if (key == VK_RETURN && waitingForDecryptKey) {
+            if (tempKey.size() > 0) {
+                std::cout << std::endl;
+                // Use the entered key to generate the full secret key
+                secretKey = GeneratePassword(10000000, tempKey);
+                waitingForDecryptKey = false;
+
+                // Process decryption with the entered key
+                // Open and read the encrypted file
+                std::ifstream inputFile(decryptFilename);
+                if (!inputFile.is_open()) {
+                    std::cerr << "Failed to open " << decryptFilename << " for decryption!" << std::endl;
+                    return 1;
+                }
+
+                std::string encryptedContent;
+                std::string line;
+                while (std::getline(inputFile, line)) {
+                    encryptedContent += line;
+                }
+                inputFile.close();
+
+                if (encryptedContent.empty()) {
+                    std::cout << "No encrypted content found in " << decryptFilename << std::endl;
+                    return 1;
+                }
+
+                // Skip the padding at the beginning - only if content is long enough
+                int paddingSize = 10000000; // We're using a fixed padding size of 100 now
+                if (encryptedContent.length() > paddingSize) {
+                    encryptedContent = encryptedContent.substr(paddingSize);
+                }
+
+                // Decrypt the content - now working directly with characters instead of hex
+                std::string decryptedText;
+                for (size_t i = 0; i < encryptedContent.length(); i++) {
+                    // XOR with key at position
+                    char decryptedChar = XOREncryptDecryptChar(encryptedContent[i], secretKey, i);
+                    decryptedText += decryptedChar;
+                }
+
+                // Display decrypted content
+                SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+                std::cout << "\nDecrypted content from " << decryptFilename << ":\n" << std::endl;
+                SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+                std::cout << decryptedText << std::endl << std::endl;
+
+                SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+                std::cout << "Press ESC to return to encrypt mode..." << std::endl;
+                SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+            }
+        }
+        else if (waitingForFilename) {
+            // Process filename input for encryption
+            BYTE keyboardState[256] = {0};
+            GetKeyboardState(keyboardState);
+            WORD character = 0;
+
+            // Handle backspace for filename
+            if (key == VK_BACK && outputFilename.length() > 0) {
+                outputFilename.pop_back();
+                // Erase the last character
+                std::cout << "\b \b";
+                return 1;
+            }
+
+            // Convert key to ASCII character
+            int result = ToAscii(key, MapVirtualKey(key, MAPVK_VK_TO_VSC), keyboardState, &character, 0);
+            if (result == 1) {
+                char charValue = static_cast<char>(character);
+                // Check for valid filename characters (basic check)
+                if (isalnum(charValue) || charValue == '.' || charValue == '_' || charValue == '-') {
+                    outputFilename += charValue;
+                    std::cout << charValue; // Show the character as typed
+                }
+            }
+        }
+        else if (waitingForDecryptFilename) {
+            // Process filename input for decryption
+            BYTE keyboardState[256] = {0};
+            GetKeyboardState(keyboardState);
+            WORD character = 0;
+
+            // Handle backspace for filename
+            if (key == VK_BACK && decryptFilename.length() > 0) {
+                decryptFilename.pop_back();
+                // Erase the last character
+                std::cout << "\b \b";
+                return 1;
+            }
+
+            // Convert key to ASCII character
+            int result = ToAscii(key, MapVirtualKey(key, MAPVK_VK_TO_VSC), keyboardState, &character, 0);
+            if (result == 1) {
+                char charValue = static_cast<char>(character);
+                // Check for valid filename characters (basic check)
+                if (isalnum(charValue) || charValue == '.' || charValue == '_' || charValue == '-') {
+                    decryptFilename += charValue;
+                    std::cout << charValue; // Show the character as typed
+                }
+            }
+        }
+        else if (waitingForDecryptKey) {
+            // Process password input in decrypt mode
+            // Convert virtual key to character
+            BYTE keyboardState[256] = {0};
+            GetKeyboardState(keyboardState);
+            char buffer[2] = {0};
+            WORD character = 0;
+
+            // Handle backspace
+            if (key == VK_BACK && tempKey.length() > 0) {
+                tempKey.pop_back();
+                // Erase the last asterisk
+                std::cout << "\b \b";
+                return 1;
+            }
+
+            // Convert key to ASCII character
+            int result = ToAscii(key, MapVirtualKey(key, MAPVK_VK_TO_VSC), keyboardState, &character, 0);
+            if (result == 1) {
+                // Add character to tempKey
+                tempKey += (char)character;
+                std::cout << '*'; // Display '*' instead of the actual character
             }
         }
         else if (!decryptMode) {
@@ -210,7 +406,7 @@ void ProcessKeyboard() {
     }
 
     std::cout << "Keyboard hook installed. All keystrokes are now redirected." << std::endl;
-    std::cout << "Please type the 8-character secret key:\n";
+    std::cout << "Please enter output filename: ";
 
     // Message loop to keep the program running and process Windows messages
     MSG msg;
@@ -246,63 +442,20 @@ void DumpToFile(const std::string& text) {
 
 void EnterDecryptMode() {
     decryptMode = true;
+    waitingForDecryptFilename = true;
+    waitingForDecryptKey = false;
+    tempKey = "";
+    decryptFilename = "";
+
     system("cls");
     SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
     std::cout << "=================================================" << std::endl;
     std::cout << "                DECRYPT MODE ACTIVE               " << std::endl;
     std::cout << "=================================================" << std::endl;
 
-    // If we don't have a key yet, ask for one first
-    if (secretKey.empty()) {
-        std::cout << "Enter the 8-character secret key used for encryption: ";
-        std::string rawKey;
-        std::cin >> rawKey;
-        // Use a reasonable key length to avoid memory issues
-        secretKey = GeneratePassword(100, rawKey);
-    }
-
-    // Open and read the encrypted file
-    std::ifstream inputFile("output.txt");
-    if (!inputFile.is_open()) {
-        std::cerr << "Failed to open output.txt for decryption!" << std::endl;
-        return;
-    }
-
-    std::string encryptedContent;
-    std::string line;
-    while (std::getline(inputFile, line)) {
-        encryptedContent += line;
-    }
-    inputFile.close();
-
-    if (encryptedContent.empty()) {
-        std::cout << "No encrypted content found in output.txt" << std::endl;
-        return;
-    }
-
-    // Skip the padding at the beginning - only if content is long enough
-    int paddingSize = 100; // We're using a fixed padding size of 100 now
-    if (encryptedContent.length() > paddingSize) {
-        encryptedContent = encryptedContent.substr(paddingSize);
-    }
-
-    // Decrypt the content - now working directly with characters instead of hex
-    std::string decryptedText;
-    for (size_t i = 0; i < encryptedContent.length(); i++) {
-        // XOR with key at position
-        char decryptedChar = XOREncryptDecryptChar(encryptedContent[i], secretKey, i);
-        decryptedText += decryptedChar;
-    }
-
-    // Display decrypted content
-    SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
-    std::cout << "\nDecrypted content:\n" << std::endl;
-    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
-    std::cout << decryptedText << std::endl << std::endl;
-
-    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
-    std::cout << "Press ESC to return to encrypt mode..." << std::endl;
-    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+    // First ask for the filename to decrypt
+    std::cout << "Enter filename to decrypt (press Enter for default 'output.txt'): ";
+    // Filename entry is now handled by the keyboard hook
 }
 
 // New function that directly encrypts/decrypts a character without hex conversion
